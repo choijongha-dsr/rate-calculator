@@ -602,15 +602,53 @@ async function downloadAsImage(evt, elementId, fileName) {
   const originalText = btn ? btn.textContent : '';
   if (btn) { btn.textContent = '저장 중...'; btn.disabled = true; }
 
+  // 화면 크기(모바일 좁은 폭)와 무관하게, 데스크탑 레이아웃 폭으로 고정한 복제본을
+  // 화면 밖에 만들어서 그걸 캡처한다. 이렇게 하면 모바일에서 눌러도
+  // 글자가 작아지거나 표가 잘리지 않고 PC에서 보는 것과 동일한 큰 화면으로 저장된다.
+  const FIXED_WIDTH = 1300; // 캡처 기준 가로폭(px). scale=3과 곱해도 모바일 캔버스 한계(~4096px) 이내로 안전하게 유지
+  const clone = el.cloneNode(true);
+  clone.removeAttribute('id');
+  // 캡처본 안의 input 값은 보이는 그대로 고정 텍스트로 바꿔준다 (input은 캡처가 잘 안 되는 경우가 있음)
+  clone.querySelectorAll('input').forEach((input) => {
+    const span = document.createElement('span');
+    span.textContent = input.value;
+    span.style.cssText = 'font-family:var(--mono);font-size:13px;color:inherit;padding:2px 4px;';
+    input.replaceWith(span);
+  });
+  clone.querySelectorAll('button').forEach((b) => b.remove()); // 저장/삭제 등 버튼은 이미지에서 제외
+  // 가로 스크롤 영역이 있으면(Dies 표 등) 캡처 시 잘리지 않도록 스크롤 제한 해제
+  clone.querySelectorAll('.dies-table-wrap, .pass-table-wrap').forEach((w) => {
+    w.style.overflowX = 'visible';
+  });
+
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = `position:fixed; left:-99999px; top:0; width:${FIXED_WIDTH}px; background:#ffffff; padding:24px; box-sizing:border-box;`;
+  wrapper.appendChild(clone);
+  document.body.appendChild(wrapper);
+
   try {
-    // 흰 배경 + 여백을 살짝 주고, 고해상도(scale 2)로 캡처해서 휴대폰 가로보기에서도 선명하게 보이도록
-    const canvas = await html2canvas(el, {
-      backgroundColor: '#ffffff',
-      scale: 2,
-      useCORS: true
-    });
+    let canvas;
+    try {
+      canvas = await html2canvas(wrapper, {
+        backgroundColor: '#ffffff',
+        scale: 2.5,
+        useCORS: true,
+        width: FIXED_WIDTH,
+        windowWidth: FIXED_WIDTH
+      });
+    } catch (e1) {
+      // 메모리 부족 등으로 고해상도 캡처가 실패하면 한 단계 낮춰서 재시도
+      canvas = await html2canvas(wrapper, {
+        backgroundColor: '#ffffff',
+        scale: 1.5,
+        useCORS: true,
+        width: FIXED_WIDTH,
+        windowWidth: FIXED_WIDTH
+      });
+    }
 
     canvas.toBlob(async (blob) => {
+      document.body.removeChild(wrapper);
       if (!blob) { if (btn) { btn.textContent = originalText; btn.disabled = false; } return; }
       const file = new File([blob], `${fileName}.png`, { type: 'image/png' });
 
@@ -638,6 +676,7 @@ async function downloadAsImage(evt, elementId, fileName) {
       if (btn) { btn.textContent = originalText; btn.disabled = false; }
     }, 'image/png');
   } catch (e) {
+    if (wrapper.parentNode) document.body.removeChild(wrapper);
     alert('이미지 저장 중 오류가 발생했습니다.');
     if (btn) { btn.textContent = originalText; btn.disabled = false; }
   }
