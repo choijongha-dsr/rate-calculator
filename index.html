@@ -226,6 +226,7 @@
       <div class="toolbar">
         <button class="tool-btn" onclick="addPass()">＋ 패스 추가</button>
         <button class="tool-btn" onclick="resetPass()">↺ 균등 재배분</button>
+        <button class="tool-btn" onclick="applyTaperedPass()">📉 테이퍼드 배분 (낮게→피크→점감)</button>
         <button class="tool-btn" onclick="sortPasses()">↕ 감면율 정렬</button>
         <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text); cursor:pointer; padding:5px 10px; border-radius:5px; background:var(--accent-light);">
           <input type="checkbox" id="lock-final" checked onchange="toggleLockFinal()" style="width:15px;height:15px;cursor:pointer;">
@@ -423,6 +424,48 @@ function initPass() {
   for (let i = 0; i < n; i++) {
     cur = (i === n - 1) ? d2 : cur * Math.sqrt(passAreaRatio);
     passDiameters.push(cur);
+  }
+  passDiameters[n - 1] = d2; // 마지막은 항상 정확히 d2
+  renderPass();
+}
+
+// 테이퍼드 배분: 1번 낮게 시작 → 2번에서 피크 → 이후 점차 감소.
+// 각 패스의 "감면 강도(가중치)"를 만들고, 그 비율대로 전체 면적감소(ln(A0/A) 기준)를 분배해
+// 정확히 d1→d2에 도달하면서도 사진의 곡선 모양을 재현한다.
+function applyTaperedPass() {
+  const d1 = parseFloat(document.getElementById('p-d1').value);
+  const d2 = parseFloat(document.getElementById('p-d2').value);
+  const n  = parseInt(document.getElementById('p-passes').value) || 10;
+  if (!d1 || !d2 || d1 <= 0 || d2 <= 0 || d2 >= d1 || n < 1) { passDiameters = []; renderPass(); return; }
+
+  // 가중치 패턴 생성: 1번은 낮게(start), 2번 근처에서 피크(peak), 이후 점차 감소(end)
+  const weights = [];
+  const peakIdx = n >= 4 ? 1 : 0; // 4패스 이상이면 2번째(index1)에서 피크, 짧으면 1번에서 시작
+  for (let i = 0; i < n; i++) {
+    let w;
+    if (i === 0) {
+      w = 0.78; // 1번: 낮게 시작
+    } else if (i <= peakIdx) {
+      w = 1.05; // 2번 근처: 피크
+    } else {
+      // 피크 이후 마지막까지 완만하게 선형 감소
+      const t = (i - peakIdx) / Math.max(1, (n - 1 - peakIdx));
+      w = 1.05 - t * 0.35; // 1.05 → 0.70 정도까지 완만히 감소
+    }
+    weights.push(Math.max(w, 0.3));
+  }
+
+  // 전체 진변형률(ln(d1^2/d2^2))을 가중치 비율대로 분배
+  const totalStrain = Math.log((d1*d1) / (d2*d2));
+  const weightSum = weights.reduce((a,b) => a+b, 0);
+
+  let cur = d1;
+  passDiameters = [];
+  for (let i = 0; i < n; i++) {
+    const strainShare = totalStrain * (weights[i] / weightSum);
+    let next = (i === n - 1) ? d2 : cur * Math.exp(-strainShare / 2); // ε = ln(d_in^2/d_out^2) = 2*ln(d_in/d_out)
+    passDiameters.push(next);
+    cur = next;
   }
   passDiameters[n - 1] = d2; // 마지막은 항상 정확히 d2
   renderPass();
@@ -756,10 +799,23 @@ function renderChart(rows, limit) {
 calcSingle();
 initPass();
 
-/* PWA: 서비스워커 등록 (오프라인 지원, 홈화면 설치) */
+/* PWA: 서비스워커 등록 (오프라인 지원, 홈화면 설치, 업데이트 자동 반영) */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      // 새 서비스워커가 설치 완료되면(=새 버전 배포됨) 자동으로 한 번 새로고침
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'activated') {
+            window.location.reload();
+          }
+        });
+      });
+      // 주기적으로(5분마다) 업데이트 확인 — 앱을 오래 켜놔도 최신 버전 반영
+      setInterval(() => reg.update(), 5 * 60 * 1000);
+    }).catch(() => {});
   });
 }
 </script>
