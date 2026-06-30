@@ -91,6 +91,15 @@
   .pass-card-bar { height: 6px; border-radius: 3px; background: var(--accent-light); margin-top: 2px; }
   .pass-card-bar-fill { height: 100%; border-radius: 3px; }
   .pass-card-lock { font-size: 11px; color: var(--accent); background: var(--accent-light); padding: 2px 8px; border-radius: 4px; }
+  .die-stepper { display: flex; align-items: center; gap: 6px; }
+  .die-stepper input[type=number] { width: 90px; text-align: center; }
+  .die-step-btn {
+    width: 32px; height: 32px; border: 1px solid var(--border2); border-radius: 6px;
+    background: var(--surface2); color: var(--text); font-size: 16px; font-weight: 600;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; flex-shrink: 0;
+  }
+  .die-step-btn:active { background: var(--accent-light); }
+  .die-step-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th { text-align: left; padding: 8px 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text3); border-bottom: 1px solid var(--border); white-space: nowrap; }
   td { padding: 5px 8px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 13px; }
@@ -225,9 +234,8 @@
       <div class="card-title">패스별 감면율 편집</div>
       <div class="toolbar">
         <button class="tool-btn" onclick="addPass()">＋ 패스 추가</button>
-        <button class="tool-btn" onclick="resetPass()">↺ 균등 재배분</button>
-        <button class="tool-btn" onclick="applyTaperedPass()">📉 테이퍼드 배분 (낮게→피크→점감)</button>
-        <button class="tool-btn" onclick="sortPasses()">↕ 감면율 정렬</button>
+        <button class="tool-btn" onclick="resetPass()">↺ 일반작업</button>
+        <button class="tool-btn" onclick="applyTaperedPass()">📉 고강도작업(테이퍼드 배분)</button>
         <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text); cursor:pointer; padding:5px 10px; border-radius:5px; background:var(--accent-light);">
           <input type="checkbox" id="lock-final" checked onchange="toggleLockFinal()" style="width:15px;height:15px;cursor:pointer;">
           🔒 완선경 고정 (마지막 패스 = 완선경 항상 유지)
@@ -458,16 +466,46 @@ function applyTaperedPass() {
   // 전체 진변형률(ln(d1^2/d2^2))을 가중치 비율대로 분배
   const totalStrain = Math.log((d1*d1) / (d2*d2));
   const weightSum = weights.reduce((a,b) => a+b, 0);
+  const MAX_RA = 23; // 각 패스 감면율 상한 (23% 미만 유지)
+  const maxStrainPerPass = -2 * Math.log(Math.sqrt(1 - MAX_RA/100)); // RA=23%에 해당하는 패스당 최대 진변형률
+
+  // 1차: 가중치대로 패스별 진변형률 배분
+  let strainShares = weights.map(w => totalStrain * (w / weightSum));
+
+  // 2차: 23%를 넘는 패스는 상한으로 클램프하고, 초과분을 클램프 안 걸린 패스들에 가중치 비율로 재분배.
+  // 모든 패스가 클램프에 걸려도(=물리적으로 23% 밑으로 더는 못 줄임) 더 분배 못하면 그대로 둠(패스 수 부족 안내는 final-note가 처리).
+  for (let iter = 0; iter < 8; iter++) {
+    let excess = 0;
+    const freeIdx = [];
+    for (let i = 0; i < n; i++) {
+      if (strainShares[i] > maxStrainPerPass) {
+        excess += strainShares[i] - maxStrainPerPass;
+        strainShares[i] = maxStrainPerPass;
+      } else {
+        freeIdx.push(i);
+      }
+    }
+    if (excess <= 1e-9 || freeIdx.length === 0) break;
+    const freeWeightSum = freeIdx.reduce((s,i) => s + weights[i], 0);
+    freeIdx.forEach(i => { strainShares[i] += excess * (weights[i] / freeWeightSum); });
+  }
 
   let cur = d1;
   passDiameters = [];
   for (let i = 0; i < n; i++) {
-    const strainShare = totalStrain * (weights[i] / weightSum);
-    let next = (i === n - 1) ? d2 : cur * Math.exp(-strainShare / 2); // ε = ln(d_in^2/d_out^2) = 2*ln(d_in/d_out)
+    let next = (i === n - 1) ? d2 : cur * Math.exp(-strainShares[i] / 2); // ε = ln(d_in^2/d_out^2) = 2*ln(d_in/d_out)
     passDiameters.push(next);
     cur = next;
   }
   passDiameters[n - 1] = d2; // 마지막은 항상 정확히 d2
+
+  // 23% 제한을 지키면서 패스 수 내에 다 못 줄였다면(=마지막 패스가 23%를 초과) 안내
+  const lastRa = (1 - (d2*d2)/(cur*cur)) * 100;
+  if (lastRa > MAX_RA + 0.5) {
+    document.getElementById('final-note').textContent =
+      `※ 패스당 23% 제한을 지키기엔 패스 수(${n}개)가 부족합니다. "＋ 패스 추가"로 패스를 늘려주세요.`;
+  }
+
   renderPass();
 }
 
@@ -512,18 +550,6 @@ function removePass(i) {
   renderPass();
 }
 
-function sortPasses() {
-  // 다이경은 항상 감소해야 하므로(내림차순) 정렬은 다이경 기준 내림차순으로 재정렬
-  if (lockFinalEnabled && passDiameters.length > 0) {
-    const last = passDiameters[passDiameters.length - 1];
-    const rest = passDiameters.slice(0, -1).sort((a, b) => b - a);
-    passDiameters = [...rest, last];
-  } else {
-    passDiameters.sort((a, b) => b - a);
-  }
-  renderPass();
-}
-
 
 // 다이경(=i번째 패스의 출선경)을 직접 입력.
 // passDiameters[i]만 바꾸고 다른 인덱스는 절대 건드리지 않음 → 뒤쪽 패스에 영향 없음.
@@ -541,6 +567,14 @@ function onDieChange(i, val) {
     passDiameters[i] = newDout;
   }
   renderPass();
+}
+
+// 모바일 카드뷰 −/+ 버튼: 현재 다이경에서 0.01mm씩 증감
+function stepDie(i, delta) {
+  if (lockFinalEnabled && i === passDiameters.length - 1) return;
+  const cur = passDiameters[i];
+  const newVal = parseFloat((cur + delta).toFixed(2));
+  onDieChange(i, newVal);
 }
 
 function renderPass() {
@@ -656,8 +690,12 @@ function renderPass() {
         </div>
         <div class="pass-card-row">
           <span class="pass-card-label">다이경 (mm)</span>
-          <input type="number" value="${dieVal.toFixed(2)}" min="0.01" step="0.01"
-            onchange="onDieChange(${i}, this.value)" ${isLastLocked ? 'disabled style="opacity:0.55;"' : ''}>
+          <div class="die-stepper">
+            <button type="button" class="die-step-btn" onclick="stepDie(${i}, -0.01)" ${isLastLocked ? 'disabled' : ''}>−</button>
+            <input type="number" id="die-input-${i}" value="${dieVal.toFixed(2)}" min="0.01" step="0.01"
+              onchange="onDieChange(${i}, this.value)" ${isLastLocked ? 'disabled style="opacity:0.55;"' : ''}>
+            <button type="button" class="die-step-btn" onclick="stepDie(${i}, 0.01)" ${isLastLocked ? 'disabled' : ''}>＋</button>
+          </div>
         </div>
         <div class="pass-card-row">
           <span class="pass-card-label">감면율</span>
