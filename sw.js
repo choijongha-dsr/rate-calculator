@@ -1,7 +1,7 @@
 // 캐시 이름에 버전을 박아두면, 코드를 바꿀 때마다 이 숫자만 올려주면
 // 예전 캐시는 자동으로 정리되고 새 버전이 적용됩니다.
 // (index.html을 새로 올릴 때 이 줄의 버전 숫자도 함께 +1 해주세요)
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE_NAME = `dsr-rate-calc-${CACHE_VERSION}`;
 const ASSETS = [
   './index.html',
