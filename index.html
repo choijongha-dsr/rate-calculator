@@ -624,7 +624,7 @@ function renderPass() {
     return `<tr class="${over ? 'row-over' : ''}">
       <td><span class="pass-num">${i+1}번</span></td>
       <td>
-        <input class="ra-input" type="number" value="${dieVal.toFixed(3)}" min="0.001" step="0.001" style="width:84px"
+        <input class="ra-input" type="number" value="${dieVal.toFixed(2)}" min="0.01" step="0.01" style="width:84px"
           onchange="onDieChange(${i}, this.value)" ${isLastLocked ? 'disabled title="완선경 자동 고정 중 — 항상 완선경 값으로 유지됩니다"' : ''} style="${isLastLocked ? 'opacity:0.55;cursor:not-allowed;width:84px;' : 'width:84px;'}">
         ${isLastLocked ? '<span class="badge" style="background:var(--accent-light);color:var(--accent);">🔒고정</span>' : ''}
       </td>
@@ -656,7 +656,7 @@ function renderPass() {
         </div>
         <div class="pass-card-row">
           <span class="pass-card-label">다이경 (mm)</span>
-          <input type="number" value="${dieVal.toFixed(3)}" min="0.001" step="0.001"
+          <input type="number" value="${dieVal.toFixed(2)}" min="0.01" step="0.01"
             onchange="onDieChange(${i}, this.value)" ${isLastLocked ? 'disabled style="opacity:0.55;"' : ''}>
         </div>
         <div class="pass-card-row">
@@ -721,7 +721,7 @@ function renderDiesTable(rows, d1) {
       const cumulRa = (1 - (r.dout*r.dout)/(d1*d1)) * 100;
       rightCells = `
         <td class="dise-num">${i + 1}</td>
-        <td class="dise-cell">${r.dout.toFixed(3)}</td>
+        <td class="dise-cell">${r.dout.toFixed(2)}</td>
         <td class="dise-cell">${cumulRa.toFixed(2)}%</td>
         <td class="dise-cell">${r.ra.toFixed(2)}%</td>
       `;
