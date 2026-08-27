@@ -335,82 +335,10 @@
     </div>
     </div><!-- /기존 작업 컬럼 -->
 
-    <!-- ── 오른쪽: 신규 작업 ── -->
+    <!-- ── 오른쪽: 신규 작업 (여러 개 추가 가능) ── -->
     <div>
-      <div style="font-size:12px;font-weight:700;color:var(--accent);padding:8px 12px;background:var(--accent-light);border-radius:8px;margin-bottom:12px;text-align:center;">신규 작업 →</div>
-
-      <!-- 신규 조건 입력 -->
-      <div class="card" style="margin-bottom:12px;">
-        <div class="card-title">신규 작업 조건</div>
-        <div class="field"><label>중간선경 (mm)</label><input type="number" id="rc-d1" step="0.01" min="0.01" placeholder="예: 8.0" inputmode="decimal" oninput="calcRechange()"></div>
-        <div class="field"><label>완선경 (mm)</label><input type="number" id="rc-d2" step="0.01" min="0.01" placeholder="예: 2.52" inputmode="decimal" oninput="calcRechange()"></div>
-        <div class="toolbar" style="margin-top:8px;">
-          <button class="tool-btn" onclick="rcCopyFromExisting()">📋 기존 다이스 복사</button>
-          <button class="tool-btn" onclick="rcResetPass()">↺ 일반작업 재배분</button>
-          <button class="tool-btn" onclick="rcTaperedPass()">📉 테이퍼드 재배분</button>
-          <button class="tool-btn" onclick="rcOptimize()" style="background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700;">⚡ 최적 교체 추천</button>
-        </div>
-        <div id="rc-summary" style="margin-top:10px;"></div>
-      </div>
-
-      <!-- 신규 패스 스케줄 (기존과 동일한 형태) -->
-      <div id="rc-pass-card" class="card" style="display:none;">
-        <div id="rc-feed-note" style="font-size:13px;color:var(--text2);margin-bottom:10px;padding:8px 12px;background:var(--surface2);border-radius:6px;"></div>
-        <div class="pass-summary" id="rc-pass-summary"></div>
-        <div class="pass-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>다이 No</th>
-                <th>다이경 (mm)</th>
-                <th>감면율 (%)</th>
-                <th style="min-width:80px;">비율</th>
-                <th>면적 감소 (mm²)</th>
-                <th>진변형률</th>
-                <th>판정</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="rc-pass-tbody"></tbody>
-          </table>
-        </div>
-        <div class="pass-cards" id="rc-pass-cards"></div>
-      </div>
-
-      <!-- 감면율 비교 차트 -->
-      <div class="card" style="margin-top:12px;">
-        <div class="card-title-row">
-          <div class="card-title" style="margin-bottom:0;">패스별 감면율 추이</div>
-        </div>
-        <div id="rc-chart-capture" style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
-          <div id="rc-chart-wrap" style="min-width:480px;"></div>
-        </div>
-      </div>
-
-      <!-- 신규 Dies 검사표 -->
-      <div class="card" style="margin-top:12px;">
-        <div class="card-title-row">
-          <div class="card-title" style="margin-bottom:0;">신규 Dies 계열 검사표</div>
-          <button class="tool-btn" onclick="startSaveRecord(event, 'rc-chart-capture', 'rc-dies-capture')">📁 다이스계열 기록표에 저장</button>
-        </div>
-        <div id="rc-dies-capture">
-          <div class="dies-table-wrap">
-            <table class="dies-table">
-              <thead>
-                <tr>
-                  <th colspan="3" style="background:var(--surface);"></th>
-                  <th>DISE NO</th>
-                  <th>DISE 경</th>
-                  <th>누적감면율</th>
-                  <th>개별감면율</th>
-                </tr>
-              </thead>
-              <tbody id="rc-dies-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
+      <div id="rc-blocks"></div>
+      <button class="tool-btn" onclick="addRcBlock()" style="width:100%;padding:12px;font-size:14px;font-weight:700;background:var(--accent-light);color:var(--accent);border:1.5px dashed var(--accent);">＋ 신규 작업 추가</button>
     </div><!-- /신규 작업 컬럼 -->
 
     </div><!-- /2컬럼 grid -->
@@ -491,10 +419,24 @@
 let machineLimit = 24;
 let passMachineLimit = 24;
 let lockFinalEnabled = true;  // 완선경 고정 여부
-let rcDiameters = [];         // 신규 작업 다이경 배열 (독립 관리)
+// 신규 작업은 여러 개를 이어서 추가할 수 있다 — idx(1,2,3...) 별로 다이경 배열과
+// "복사 시점 중간선경"을 독립적으로 들고 있는다.
+let rcState = {};             // idx -> { diameters: [], baseD1: null }
+let rcNextIdx = 0;            // 다음에 추가할 신규 작업 번호
 let _passLastD1 = null;       // 직전에 renderPass가 정상 렌더링한 중간선경 (엔드포인트 변경 시 비례 재조정용)
 let _passLastD2 = null;       // 직전에 renderPass가 정상 렌더링한 완선경
-let _rcBaseD1 = null;         // "기존 다이스 복사" 시점의 중간선경 (신규 중간선경 변경 여부 판단 기준)
+
+// "기존 다이스 복사"의 원본 — 1번 신규 작업은 기존 작업(passDiameters)에서, 2번째부터는
+// 바로 앞 신규 작업에서 그대로 이어받는다(사용자 요청: 순차적으로 여러 완선경을 처리할 때
+// 매번 원본이 아니라 직전 결과를 이어받도록).
+function getRcSourceDiameters(idx) {
+  if (idx <= 1 || !rcState[idx - 1] || !rcState[idx - 1].diameters.length) return passDiameters;
+  return rcState[idx - 1].diameters;
+}
+function getRcSourceD1(idx) {
+  if (idx <= 1 || !rcState[idx - 1] || !rcState[idx - 1].diameters.length) return parseFloat(document.getElementById('p-d1').value);
+  return parseFloat(document.getElementById('rc-d1-' + (idx - 1)).value);
+}
 
 // 각 패스의 감면 배분(strain share)이 설비 한계(ms)를 넘지 못하게 캡을 씌우고,
 // 넘친 만큼(excess)을 아직 한계 이하인 패스들에게 가중치 비례로 재분배한다.
@@ -576,29 +518,125 @@ function buildTaperedTail(startD, dTarget, tailN, ms, minRaPct) {
   return tail;
 }
 
+// 신규 작업 블록 하나(idx)를 통째로 그리는 템플릿 — 조건 입력, 패스 표, 차트, DIES 검사표까지
+// 기존 하나짜리 "신규 작업" 컬럼과 완전히 동일한 구성을 idx별로 반복해서 쓸 수 있게 만든 것.
+function rcBlockTemplate(idx) {
+  return `
+    <div style="font-size:12px;font-weight:700;color:var(--accent);padding:8px 12px;background:var(--accent-light);border-radius:8px;margin-bottom:12px;display:flex;align-items:center;justify-content:center;gap:10px;">
+      <span>신규 작업 ${idx} →</span>
+      <button onclick="removeRcBlock(${idx})" title="이 신규 작업 삭제" style="border:none;background:transparent;color:var(--accent);cursor:pointer;font-size:13px;">✕ 삭제</button>
+    </div>
+
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-title">신규 작업 ${idx} 조건</div>
+      <div class="field"><label>중간선경 (mm)</label><input type="number" id="rc-d1-${idx}" step="0.01" min="0.01" placeholder="예: 8.0" inputmode="decimal" oninput="calcRechange(${idx})"></div>
+      <div class="field"><label>완선경 (mm)</label><input type="number" id="rc-d2-${idx}" step="0.01" min="0.01" placeholder="예: 2.52" inputmode="decimal" oninput="calcRechange(${idx})"></div>
+      <div class="toolbar" style="margin-top:8px;">
+        <button class="tool-btn" onclick="rcCopyFromExisting(${idx})">📋 ${idx <= 1 ? '기존' : '이전'} 다이스 복사</button>
+        <button class="tool-btn" onclick="rcResetPass(${idx})">↺ 일반작업 재배분</button>
+        <button class="tool-btn" onclick="rcTaperedPass(${idx})">📉 테이퍼드 재배분</button>
+        <button class="tool-btn" onclick="rcOptimize(${idx})" style="background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700;">⚡ 최적 교체 추천</button>
+      </div>
+      <div id="rc-summary-${idx}" style="margin-top:10px;"></div>
+    </div>
+
+    <div id="rc-pass-card-${idx}" class="card" style="display:none;">
+      <div id="rc-feed-note-${idx}" style="font-size:13px;color:var(--text2);margin-bottom:10px;padding:8px 12px;background:var(--surface2);border-radius:6px;"></div>
+      <div class="pass-summary" id="rc-pass-summary-${idx}"></div>
+      <div class="pass-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>다이 No</th>
+              <th>다이경 (mm)</th>
+              <th>감면율 (%)</th>
+              <th style="min-width:80px;">비율</th>
+              <th>면적 감소 (mm²)</th>
+              <th>진변형률</th>
+              <th>판정</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="rc-pass-tbody-${idx}"></tbody>
+        </table>
+      </div>
+      <div class="pass-cards" id="rc-pass-cards-${idx}"></div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <div class="card-title-row">
+        <div class="card-title" style="margin-bottom:0;">패스별 감면율 추이</div>
+      </div>
+      <div id="rc-chart-capture-${idx}" style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
+        <div id="rc-chart-wrap-${idx}" style="min-width:480px;"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <div class="card-title-row">
+        <div class="card-title" style="margin-bottom:0;">신규 Dies 계열 검사표</div>
+        <button class="tool-btn" onclick="startSaveRecord(event, 'rc-chart-capture-${idx}', 'rc-dies-capture-${idx}')">📁 다이스계열 기록표에 저장</button>
+      </div>
+      <div id="rc-dies-capture-${idx}">
+        <div class="dies-table-wrap">
+          <table class="dies-table">
+            <thead>
+              <tr>
+                <th colspan="3" style="background:var(--surface);"></th>
+                <th>DISE NO</th>
+                <th>DISE 경</th>
+                <th>누적감면율</th>
+                <th>개별감면율</th>
+              </tr>
+            </thead>
+            <tbody id="rc-dies-tbody-${idx}"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function addRcBlock() {
+  const idx = ++rcNextIdx;
+  rcState[idx] = { diameters: [], baseD1: null };
+  const wrap = document.createElement('div');
+  wrap.id = 'rc-block-' + idx;
+  wrap.innerHTML = rcBlockTemplate(idx);
+  document.getElementById('rc-blocks').appendChild(wrap);
+}
+
+function removeRcBlock(idx) {
+  if (!confirm(idx + '번 신규 작업을 삭제할까요?')) return;
+  delete rcState[idx];
+  const el = document.getElementById('rc-block-' + idx);
+  if (el) el.remove();
+}
+
 // 기존 다이스를 신규 작업으로 복사
 // ⚡ 최적 교체 추천
 //   - 중간선경이 바뀐 경우: 앞쪽 다이는 새 중간선경에 맞지 않으므로 재사용하지 않고 전체를 새로 설계
 //   - 중간선경이 동일하고 완선경만 바뀐 경우: 앞쪽은 최대한 그대로 유지하고,
 //     뒤쪽 연속 구간만 마지막 유지 다이경 → 새 완선경으로 매끄럽게 재분배(테이퍼 형태 유지)
-function rcOptimize() {
-  const d1 = parseFloat(document.getElementById('rc-d1').value);
-  const d2 = parseFloat(document.getElementById('rc-d2').value);
-  if(!d1||!d2||!rcDiameters.length||!passDiameters.length) {
-    alert('기존 다이스를 먼저 복사하세요 (📋 기존 다이스 복사)');
+function rcOptimize(idx) {
+  const st = rcState[idx];
+  const d1 = parseFloat(document.getElementById('rc-d1-'+idx).value);
+  const d2 = parseFloat(document.getElementById('rc-d2-'+idx).value);
+  const source = getRcSourceDiameters(idx); // 1번은 기존 작업, 2번째부터는 바로 앞 신규 작업
+  if(!d1||!d2||!st.diameters.length||!source.length) {
+    alert(`${idx <= 1 ? '기존' : '이전'} 다이스를 먼저 복사하세요 (📋 ${idx <= 1 ? '기존' : '이전'} 다이스 복사)`);
     return;
   }
 
-  const n = rcDiameters.length;
+  const n = st.diameters.length;
   // 패스당 최대 감면율 상한 — 설비 한계(H형 24%/D형 17%)보다 1%p 낮게 캡을 잡는다 (여유 확보).
-  // ※ 이전엔 23%로 고정돼 있어서 D형(17%) 설비에서는 이 캡 자체가 실제 한계보다 높아 무의미했음.
   const ms = -2*Math.log(Math.sqrt(1-Math.max(passMachineLimit-1,1)/100));
-  const sumEl = document.getElementById('rc-summary');
+  const sumEl = document.getElementById('rc-summary-'+idx);
 
   // 중간선경이 바뀌었으면 앞쪽 다이 재사용 불가 → 최소교체 탐색 없이 전체 재설계
-  const baseD1 = _rcBaseD1 || d1;
+  const baseD1 = st.baseD1 || d1;
   if (Math.abs(d1 - baseD1) > 0.01) {
-    rcTaperedPass(); // rcDiameters 전체를 새 중간선경/완선경 기준 테이퍼 배분으로 재계산
+    rcTaperedPass(idx); // st.diameters 전체를 새 중간선경/완선경 기준 테이퍼 배분으로 재계산
     if (sumEl) sumEl.innerHTML = `
       <div style="padding:14px 16px;background:var(--danger-light);border:1.5px solid var(--danger);border-radius:10px;font-size:13px;">
         <div style="font-weight:700;font-size:14px;color:var(--danger);margin-bottom:6px;">🔴 중간선경 변경 — 다이스 전체 교체 필요</div>
@@ -607,11 +645,11 @@ function rcOptimize() {
     return;
   }
 
-  // 앞쪽 keepCount개는 기존 다이경 그대로, 나머지(꼬리)는 마지막 유지 다이경→새 완선경까지 테이퍼드로 재분배
+  // 앞쪽 keepCount개는 원본(source) 다이경 그대로, 나머지(꼬리)는 마지막 유지 다이경→새 완선경까지 테이퍼드로 재분배
   function buildTailReplacement(keepCount) {
-    const head = passDiameters.slice(0, keepCount);
+    const head = source.slice(0, keepCount);
     const tailN = n - keepCount;
-    const startD = keepCount === 0 ? d1 : passDiameters[keepCount - 1];
+    const startD = keepCount === 0 ? d1 : source[keepCount - 1];
     const tail = buildTaperedTail(startD, d2, tailN, ms);
     return head.concat(tail);
   }
@@ -662,11 +700,11 @@ function rcOptimize() {
       ${infeasibleWarning}
       <div style="font-size:12px;color:var(--text3);margin-bottom:14px;">앞쪽부터 최대한 유지 · 뒤쪽 연속 구간만 새 완선경까지 매끄럽게 재분배 · 유지 다이스는 감면율 3%~${passMachineLimit+1}% 범위 내</div>
       <div style="display:flex;gap:10px;">
-        <button onclick="rcApplyOptimize(${JSON.stringify(bestDias)})"
+        <button onclick="rcApplyOptimize(${idx}, ${JSON.stringify(bestDias)})"
           style="flex:1;padding:10px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">
           ✅ 이대로 적용
         </button>
-        <button onclick="document.getElementById('rc-summary').innerHTML=''"
+        <button onclick="document.getElementById('rc-summary-${idx}').innerHTML=''"
           style="flex:1;padding:10px;background:var(--surface);color:var(--text2);border:1.5px solid var(--border);border-radius:8px;font-size:14px;cursor:pointer;">
           ✕ 취소
         </button>
@@ -674,23 +712,24 @@ function rcOptimize() {
     </div>`;
 }
 
-function rcApplyOptimize(dias) {
-  rcDiameters = dias;
-  const sumEl = document.getElementById('rc-summary');
+function rcApplyOptimize(idx, dias) {
+  rcState[idx].diameters = dias;
+  const sumEl = document.getElementById('rc-summary-'+idx);
   if(sumEl) sumEl.innerHTML = '';
-  renderRcPass();
+  renderRcPass(idx);
 }
 
 // 완선경(목표값)은 절대 못 바꾸므로, 그 앞의 다이들을 필요한 만큼만 뒤에서부터 안전하게(설비 한계 이내) 재분배한다.
 // 마지막 다이 하나만 억지로 갈아치우면 그 한 패스에 감면이 몰려 한계를 넘는 문제(완선경 초과)가 생기므로
-// 현재 rcDiameters를 "재사용 후보"로 두고, 몇 개까지 그대로 쓸 수 있는지부터 찾는다.
-function rcAutoBalance(d1, d2) {
-  const n = rcDiameters.length;
+// 현재 다이경을 "재사용 후보"로 두고, 몇 개까지 그대로 쓸 수 있는지부터 찾는다.
+function rcAutoBalance(idx, d1, d2) {
+  const st = rcState[idx];
+  const n = st.diameters.length;
   if (!d1 || !d2 || d1 <= 0 || d2 <= 0 || d2 >= d1 || n === 0) return;
 
   const limit = passMachineLimit;
   const ms = -2 * Math.log(Math.sqrt(1 - Math.max(limit-1,1)/100));
-  const baseline = rcDiameters.slice();
+  const baseline = st.diameters.slice();
 
   function buildTailReplacement(keepCount) {
     const head = baseline.slice(0, keepCount);
@@ -717,53 +756,54 @@ function rcAutoBalance(d1, d2) {
     const dias = buildTailReplacement(keep);
     if (isValidKeep(raRows(dias), keep)) { best = dias; break; }
   }
-  rcDiameters = best || buildTailReplacement(0);
+  st.diameters = best || buildTailReplacement(0);
   return !!best; // false면 이 패스 수로는 설비 한계 내에서 불가능 (호출부에서 필요시 경고 처리)
 }
 
-function rcCopyFromExisting() {
-  rcDiameters = [...passDiameters];
-  _rcBaseD1 = parseFloat(document.getElementById('p-d1').value); // 이 시점의 중간선경을 기준으로 이후 변경 여부 판단
-  const rcD1 = parseFloat(document.getElementById('rc-d1').value);
-  const rcD2 = parseFloat(document.getElementById('rc-d2').value);
-  if(!isNaN(rcD1) && !isNaN(rcD2) && rcD1 > 0 && rcD2 > 0)
-    rcAutoBalance(rcD1, rcD2);
-  renderRcPass();
+// "복사"라는 이름 그대로 원본(1번은 기존 작업, 2번째부터는 바로 앞 신규 작업)을 있는 그대로
+// 전부 그대로 가져온다 — 신규 중간선/완선경이 이미 입력되어 있어도 여기서는 재배분하지
+// 않는다(재배분은 사용자가 rc-d1/rc-d2를 직접 바꿀 때 calcRechange()가 알아서 처리한다).
+function rcCopyFromExisting(idx) {
+  const source = getRcSourceDiameters(idx);
+  rcState[idx].diameters = [...source];
+  rcState[idx].baseD1 = getRcSourceD1(idx); // 이 시점의 중간선경을 기준으로 이후 변경 여부 판단
+  renderRcPass(idx);
 }
 
-function calcRechange() {
+function calcRechange(idx) {
   // 신규 중간선경/완선경이 바뀔 때: 완선경(목표)은 그대로 두고, 필요한 만큼만 뒤에서부터 안전하게 재분배
-  const rcD1 = parseFloat(document.getElementById('rc-d1').value);
-  const rcD2 = parseFloat(document.getElementById('rc-d2').value);
-  if(rcDiameters.length > 0 && !isNaN(rcD1) && !isNaN(rcD2) && rcD1 > 0 && rcD2 > 0) {
-    rcAutoBalance(rcD1, rcD2);
-    renderRcPass();
+  const rcD1 = parseFloat(document.getElementById('rc-d1-'+idx).value);
+  const rcD2 = parseFloat(document.getElementById('rc-d2-'+idx).value);
+  if(rcState[idx].diameters.length > 0 && !isNaN(rcD1) && !isNaN(rcD2) && rcD1 > 0 && rcD2 > 0) {
+    rcAutoBalance(idx, rcD1, rcD2);
+    renderRcPass(idx);
   }
 }
 
 // 신규 작업 일반작업 재배분
-function rcResetPass() {
-  const d1 = parseFloat(document.getElementById('rc-d1').value);
-  const d2 = parseFloat(document.getElementById('rc-d2').value);
-  const n  = rcDiameters.length || passDiameters.length;
+function rcResetPass(idx) {
+  const st = rcState[idx];
+  const d1 = parseFloat(document.getElementById('rc-d1-'+idx).value);
+  const d2 = parseFloat(document.getElementById('rc-d2-'+idx).value);
+  const n  = st.diameters.length || getRcSourceDiameters(idx).length;
   if(!d1||!d2||d2>=d1||n<1) return;
   const ratio = Math.pow((d2*d2)/(d1*d1), 1/n);
   let cur = d1;
-  rcDiameters = Array.from({length:n}, (_,i)=>{
+  st.diameters = Array.from({length:n}, (_,i)=>{
     cur = i===n-1 ? d2 : cur*Math.sqrt(ratio);
     return cur;
   });
-  rcDiameters[n-1] = d2;
-  renderRcPass();
+  st.diameters[n-1] = d2;
+  renderRcPass(idx);
 }
 
 // 신규 작업 테이퍼드 재배분
-function rcTaperedPass() {
-  const d1 = parseFloat(document.getElementById('rc-d1').value);
-  const d2 = parseFloat(document.getElementById('rc-d2').value);
-  const n  = rcDiameters.length || passDiameters.length;
+function rcTaperedPass(idx) {
+  const st = rcState[idx];
+  const d1 = parseFloat(document.getElementById('rc-d1-'+idx).value);
+  const d2 = parseFloat(document.getElementById('rc-d2-'+idx).value);
+  const n  = st.diameters.length || getRcSourceDiameters(idx).length;
   if(!d1||!d2||d2>=d1||n<1) return;
-  const peakAt=n>=4?1:0;
   const wts=Array.from({length:n},(_,i)=>{
     const t=i/Math.max(1,n-1);
     return Math.max(1.05-Math.pow(t,0.55)*0.45, 0.58);
@@ -772,56 +812,60 @@ function rcTaperedPass() {
   const ms=-2*Math.log(Math.sqrt(1-Math.max(passMachineLimit-1,1)/100));
   const ss=capStrainShares(wts.map(w=>ts*(w/ws)), wts, ms);
   let cur=d1;
-  rcDiameters=ss.map((s,i)=>{const next=i===n-1?d2:cur*Math.exp(-s/2);cur=next;return next;});
-  rcDiameters[n-1]=d2;
-  renderRcPass();
+  st.diameters=ss.map((s,i)=>{const next=i===n-1?d2:cur*Math.exp(-s/2);cur=next;return next;});
+  st.diameters[n-1]=d2;
+  renderRcPass(idx);
 }
 
 // 신규 작업 다이경 변경
-function onRcDieChange(i, val) {
+function onRcDieChange(idx, i, val) {
+  const st = rcState[idx];
   const newD = parseFloat(val);
-  if(isNaN(newD)||newD<=0) {renderRcPass();return;}
-  const d1 = parseFloat(document.getElementById('rc-d1').value);
-  const prev = i===0 ? d1 : rcDiameters[i-1];
-  if(newD<prev) rcDiameters[i]=newD;
-  renderRcPass();
+  if(isNaN(newD)||newD<=0) {renderRcPass(idx);return;}
+  const d1 = parseFloat(document.getElementById('rc-d1-'+idx).value);
+  const prev = i===0 ? d1 : st.diameters[i-1];
+  if(newD<prev) st.diameters[i]=newD;
+  renderRcPass(idx);
 }
 
-function stepRcDie(i, delta) {
-  const cur = rcDiameters[i];
-  onRcDieChange(i, parseFloat((cur+delta).toFixed(2)));
+function stepRcDie(idx, i, delta) {
+  const cur = rcState[idx].diameters[i];
+  onRcDieChange(idx, i, parseFloat((cur+delta).toFixed(2)));
 }
 
 // 신규 작업 i번 뒤에 패스 삽입
-function insertRcPass(i) {
-  const d1 = parseFloat(document.getElementById('rc-d1').value);
-  const before = i < 0 ? d1 : rcDiameters[i];
-  const after  = rcDiameters[i + 1];
+function insertRcPass(idx, i) {
+  const st = rcState[idx];
+  const d1 = parseFloat(document.getElementById('rc-d1-'+idx).value);
+  const before = i < 0 ? d1 : st.diameters[i];
+  const after  = st.diameters[i + 1];
   if(after === undefined) return;
   const mid = parseFloat(Math.sqrt(before * after).toFixed(3));
-  rcDiameters.splice(i + 1, 0, mid);
-  renderRcPass();
+  st.diameters.splice(i + 1, 0, mid);
+  renderRcPass(idx);
 }
 
 // 신규 작업 i번 패스 제거
-function removeRcPass(i) {
-  if(rcDiameters.length <= 1) return;
-  rcDiameters.splice(i, 1);
-  renderRcPass();
+function removeRcPass(idx, i) {
+  const st = rcState[idx];
+  if(st.diameters.length <= 1) return;
+  st.diameters.splice(i, 1);
+  renderRcPass(idx);
 }
 
 // 신규 작업 패스 렌더링 (기존 renderPass와 동일한 방식)
-function renderRcPass() {
-  const card   = document.getElementById('rc-pass-card');
-  const tbody  = document.getElementById('rc-pass-tbody');
-  const note   = document.getElementById('rc-feed-note');
-  const sumEl  = document.getElementById('rc-pass-summary');
+function renderRcPass(idx) {
+  const st     = rcState[idx];
+  const card   = document.getElementById('rc-pass-card-'+idx);
+  const tbody  = document.getElementById('rc-pass-tbody-'+idx);
+  const note   = document.getElementById('rc-feed-note-'+idx);
+  const sumEl  = document.getElementById('rc-pass-summary-'+idx);
   if(!card||!tbody) return;
 
-  const d1 = parseFloat(document.getElementById('rc-d1').value);
-  const d2 = parseFloat(document.getElementById('rc-d2').value);
+  const d1 = parseFloat(document.getElementById('rc-d1-'+idx).value);
+  const d2 = parseFloat(document.getElementById('rc-d2-'+idx).value);
 
-  if(!d1||!d2||!rcDiameters.length) { card.style.display='none'; return; }
+  if(!d1||!d2||!st.diameters.length) { card.style.display='none'; return; }
   card.style.display = 'block';
 
   if(note) note.textContent = `투입 중간선경: ${d1} mm → 아래 다이 1번부터 순서대로 통과`;
@@ -829,7 +873,7 @@ function renderRcPass() {
   const limit = passMachineLimit;
   let prev = d1, totalRa=0, overCount=0;
 
-  const rows = rcDiameters.map((dout, i) => {
+  const rows = st.diameters.map((dout, i) => {
     const ra      = (1-(dout*dout)/(prev*prev))*100;
     const dA      = prev*prev*Math.PI/4 - dout*dout*Math.PI/4;
     const strain  = Math.log((prev*prev)/(dout*dout));
@@ -841,27 +885,19 @@ function renderRcPass() {
   const avgRa = rows.reduce((s,r)=>s+r.ra,0)/rows.length;
   overCount = rows.filter(r=>r.ra>limit).length;
 
-  // 이상 감면율 계산 (신규 d1/d2 기준 균등 배분)
-  const totalIdealStrain = Math.log((d1*d1)/(d2*d2));
-  const n = rcDiameters.length;
-  let idealPrev = d1;
-  const idealRas = Array.from({length: n}, (_, i) => {
-    const idealStrain = totalIdealStrain / n;
-    const idealDout = i === n-1 ? d2 : idealPrev * Math.exp(-idealStrain/2);
-    const ra = (1-(idealDout*idealDout)/(idealPrev*idealPrev))*100;
-    idealPrev = idealDout;
-    return ra;
-  });
+  const n = st.diameters.length;
+  const source = getRcSourceDiameters(idx); // 1번은 기존 작업, 2번째부터는 바로 앞 신규 작업
 
-  // 교체 필요 판정 — 신규 d1 기준 실제 감면율 vs 이상 감면율 차이
-  const existD1 = parseFloat(document.getElementById('p-d1').value);
-  const hasPrev = passDiameters.length > 0 && rcDiameters.length > 0;
+  // 교체/유지 판정 — 원본(source)과 지금 값이 실제로 같은 물리적 다이인지(0.01mm 단위로
+  // 같은 값인지) 직접 비교한다. 예전엔 "균등 배분 이상값"과 비교해서, 일부러 낮게 설계해둔
+  // 1번 같은 패스가 값이 하나도 안 바뀌었는데도 "교체 필요"로 잘못 뜨는 문제가 있었다.
+  const hasPrev = source.length > 0 && st.diameters.length > 0;
   let replaceNums = [], keepNums = [];
   if(hasPrev) {
     rows.forEach((r, i) => {
-      if(i === n-1) return;
-      const raDiff = Math.abs(r.ra - idealRas[i]);
-      if(raDiff > 3) replaceNums.push(i+1);
+      if(i === n-1) return; // 완선경은 항상 교체이므로 목록에서 제외
+      const isSame = i < source.length && Math.abs(r.dout - source[i]) < 0.005;
+      if(!isSame) replaceNums.push(i+1);
       else keepNums.push(i+1);
     });
   }
@@ -872,11 +908,12 @@ function renderRcPass() {
     <div class="metric"><div class="metric-label">총 패스 수</div><div class="metric-value">${rows.length}<span class="metric-unit">패스</span></div></div>
     <div class="metric"><div class="metric-label">패스당 평균</div><div class="metric-value">${avgRa.toFixed(2)}<span class="metric-unit">%</span></div></div>
     ${overCount>0?`<div class="metric danger-m"><div class="metric-label">한계 초과</div><div class="metric-value">${overCount}<span class="metric-unit">패스</span></div></div>`:''}
+    ${rows[rows.length-1].ra > 15 ? `<div class="metric danger-m"><div class="metric-label">마지막 패스 15% 초과</div><div class="metric-value">${rows[rows.length-1].ra.toFixed(2)}<span class="metric-unit">%</span></div><div style="font-size:11px;color:var(--text3);margin-top:2px;">사내 기준(DSRF-1210-14) 15% 이하 권장</div></div>` : ''}
     ${hasPrev && (replaceNums.length > 0 || keepNums.length > 0) ? `
     <div style="margin-top:10px;padding:10px 14px;background:var(--surface2);border-radius:8px;font-size:13px;line-height:1.8;">
       ${replaceNums.length > 0 ? `<div><span style="background:var(--danger-light);color:var(--danger);font-weight:700;padding:2px 8px;border-radius:12px;margin-right:6px;">🔴 교체 ${replaceNums.length}개</span><span style="color:var(--danger);font-weight:600;">${replaceNums.map(n=>n+'번').join(', ')}</span></div>` : ''}
       ${keepNums.length > 0 ? `<div style="margin-top:4px;"><span style="background:var(--ok-light);color:var(--ok);font-weight:700;padding:2px 8px;border-radius:12px;margin-right:6px;">🟢 유지 ${keepNums.length}개</span><span style="color:var(--ok);">${keepNums.map(n=>n+'번').join(', ')}</span></div>` : ''}
-      <div style="margin-top:6px;font-size:11px;color:var(--text3);">완선경(${n}번)은 항상 교체 · 이상 감면율 대비 차이 3pp 초과 시 교체 권장</div>
+      <div style="margin-top:6px;font-size:11px;color:var(--text3);">완선경(${n}번)은 항상 교체 · 원본과 실제로 같은 값(0.01mm 단위)인 패스만 유지로 표시</div>
     </div>` : ''}
   `;
 
@@ -884,39 +921,37 @@ function renderRcPass() {
   tbody.innerHTML = rows.map((r, i) => {
     const over  = r.ra > limit;
     const near  = r.ra > limit*0.9 && !over;
-    const badge = over?`<span class="badge badge-danger">초과</span>`:near?`<span class="badge badge-warn">주의</span>`:'';
+    const isLast= i===rows.length-1;
+    const lastOver15 = isLast && r.ra > 15;
+    const badge = (over?`<span class="badge badge-danger">초과</span>`:near?`<span class="badge badge-warn">주의</span>`:'')
+      + (lastOver15 ? `<span class="badge badge-warn" title="사내 기준(DSRF-1210-14): 마지막 패스 15% 이하">마지막 15%↑</span>` : '');
     const barW  = Math.min(Math.round((r.ra/limit)*60),60);
     const barCls= over?'over-bar':near?'warn-bar':'ok-bar';
-    const isLast= i===rows.length-1;
     const dieVal= r.dout;
 
-    // 판정: 이상 감면율 대비 실제 감면율 차이로 판단
+    // 판정: 원본(source)과 실제로 같은 값인지로 판단(균등 배분 이상값과 비교하면
+    // 일부러 낮게 설계해둔 패스가 안 바뀌었는데도 "교체 필요"로 잘못 뜨는 문제가 있었다).
     let judgeCell = '';
-    if(i < passDiameters.length) {
+    if(i < source.length) {
       if(isLast) {
         judgeCell = `<span class="badge" style="background:var(--accent-light);color:var(--accent);">완선경</span>`;
       } else {
-        const raDiff = Math.abs(r.ra - idealRas[i]);
-        const origRa = passDiameters[i]; // 기존 다이경 유지 시 감면율
-        if(raDiff <= 1.5) {
-          judgeCell = `<span class="badge" style="background:var(--ok-light);color:var(--ok);">🟢 유지</span>`;
-        } else if(raDiff <= 4) {
-          judgeCell = `<span class="badge" style="background:#fff8e1;color:#f57c00;">🟡 검토</span>`;
-        } else {
-          judgeCell = `<span class="badge" style="background:var(--danger-light);color:var(--danger);">🔴 교체</span>`;
-        }
+        const isSame = Math.abs(r.dout - source[i]) < 0.005;
+        judgeCell = isSame
+          ? `<span class="badge" style="background:var(--ok-light);color:var(--ok);">🟢 유지</span>`
+          : `<span class="badge" style="background:var(--danger-light);color:var(--danger);">🔴 교체</span>`;
       }
     }
 
     return `<tr class="${over?'row-over':''}" style="${!isLast && judgeCell.includes('교체')?'background:#fff4f3;':''}">
       <td><span class="pass-num">${i+1}번</span></td>
       <td style="white-space:nowrap;">
-        <button class="die-step-btn" onclick="stepRcDie(${i},-0.01)" style="width:32px;height:26px;">−</button>
+        <button class="die-step-btn" onclick="stepRcDie(${idx},${i},-0.01)" style="width:32px;height:26px;">−</button>
         <input class="ra-input" type="number" value="${dieVal.toFixed(2)}" min="0.01" step="0.01" inputmode="decimal"
           style="width:72px;vertical-align:middle;${isLast?'font-weight:700;color:var(--accent);':''}"
-          onchange="onRcDieChange(${i}, this.value)">
+          onchange="onRcDieChange(${idx}, ${i}, this.value)">
         ${isLast?`<span class="badge" style="background:var(--accent-light);color:var(--accent);">완선경</span>`:''}
-        <button class="die-step-btn" onclick="stepRcDie(${i},0.01)" style="width:32px;height:26px;">＋</button>
+        <button class="die-step-btn" onclick="stepRcDie(${idx},${i},0.01)" style="width:32px;height:26px;">＋</button>
       </td>
       <td class="computed">${r.ra.toFixed(2)}% ${badge}</td>
       <td><div class="bar-wrap"><div class="bar ${barCls}" style="width:${barW}px"></div><span style="font-size:11px;color:var(--text3)">${r.ra.toFixed(1)}%</span></div></td>
@@ -925,8 +960,8 @@ function renderRcPass() {
       <td>${judgeCell}</td>
       <td>
         <div style="display:flex;gap:4px;">
-          <button class="act-btn" style="background:var(--accent-light);color:var(--accent);border:1px solid var(--accent);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="insertRcPass(${i})" title="${i+1}번 뒤에 추가">추가</button>
-          ${rcDiameters.length > 1 ? `<button class="act-btn" style="background:var(--danger-light);color:var(--danger);border:1px solid var(--danger);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="removeRcPass(${i})" title="제거">제거</button>` : ''}
+          <button class="act-btn" style="background:var(--accent-light);color:var(--accent);border:1px solid var(--accent);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="insertRcPass(${idx},${i})" title="${i+1}번 뒤에 추가">추가</button>
+          ${st.diameters.length > 1 ? `<button class="act-btn" style="background:var(--danger-light);color:var(--danger);border:1px solid var(--danger);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="removeRcPass(${idx},${i})" title="제거">제거</button>` : ''}
         </div>
       </td>
     </tr>
@@ -934,14 +969,14 @@ function renderRcPass() {
   }).join('');
 
   // 차트 렌더링
-  renderRcChart(rows.map(r=>r.ra), rows.length, limit);
+  renderRcChart(idx, rows.map(r=>r.ra), rows.length, limit);
 
   // Dies 검사표 렌더링
-  renderRcDies(rows, d1, d2);
+  renderRcDies(idx, rows, d1, d2);
 }
 
-function renderRcChart(ras, n, limit) {
-  const el = document.getElementById('rc-chart-wrap');
+function renderRcChart(idx, ras, n, limit) {
+  const el = document.getElementById('rc-chart-wrap-'+idx);
   if(!el) return;
   const W=760,H=420,padL=54,padR=20,padT=24,padB=48;
   const plotW=W-padL-padR, plotH=H-padT-padB;
@@ -980,8 +1015,8 @@ function renderRcChart(ras, n, limit) {
   </svg>`;
 }
 
-function renderRcDies(rows, d1, d2) {
-  const tbody = document.getElementById('rc-dies-tbody');
+function renderRcDies(idx, rows, d1, d2) {
+  const tbody = document.getElementById('rc-dies-tbody-'+idx);
   if(!tbody) return;
 
   // 기존 dies 검사표와 동일한 left 메타 정보 + right 데이터
@@ -1249,7 +1284,7 @@ function buildSmoothTaperedPass(d1, d2, n, weights, peakIdx) {
   // 반올림한다 — 절대 위치를 독립적으로 반올림하면 오차가 뒤죽박죽 섞여 모양이 삐뚤빼뚤해진다.
   let cur = d1;
   const passDiams = strainShares.map((s, i) => {
-    const next = i === n-1 ? d2 : Math.round(cur * Math.exp(-s/2) * 100) / 100;
+    const next = i === n-1 ? d2 : Math.round(cur * Math.exp(-s/2) * 100) / 100; // 0.01mm 격자
     cur = next; return next;
   });
 
@@ -1270,7 +1305,7 @@ function buildSmoothTaperedPass(d1, d2, n, weights, peakIdx) {
     for (let i = peakIdx; i <= n - 2; i++) freeIdx.push(i);
     const cands = freeIdx.map(i => {
       const v = idealDiams[i];
-      const r = Math.round(v*100);
+      const r = Math.round(v*100); // 0.01mm 격자
       return Array.from(new Set([(r-2)/100, (r-1)/100, r/100, (r+1)/100, (r+2)/100])); // 반올림 근처 5개 격자점
     });
     // 각 패스의 "원래 목표" 감면율(반올림 전, strainShares 그대로의 이상적인 값).
@@ -1512,7 +1547,7 @@ function onDieInputKeydown(e, i) {
   if (next) { next.focus(); next.select(); }
 }
 
-// 모바일 카드뷰 −/+ 버튼: 현재 다이경에서 0.01mm씩 증감
+// −/+ 버튼: 현재 다이경에서 0.01mm씩 증감
 function stepDie(i, delta) {
   if (lockFinalEnabled && i === passDiameters.length - 1) return;
   const cur = passDiameters[i];
@@ -1592,9 +1627,9 @@ let _pendingRecordElementId1 = null; // 도금/작업번호 바뀔 때 제목 �
 
 // 날짜(연도 포함) + 중간선→완선경 + 도금여부 + 작업번호를 조합해 제목을 자동 생성한다.
 function suggestRecordTitle(elementId1) {
-  const isRc = elementId1.indexOf('rc-') === 0;
-  const d1 = parseFloat(document.getElementById(isRc ? 'rc-d1' : 'p-d1').value);
-  const d2 = parseFloat(document.getElementById(isRc ? 'rc-d2' : 'p-d2').value);
+  const rcMatch = elementId1.match(/^rc-chart-capture-(\d+)$/); // 신규 작업 N번의 캡처 영역 id
+  const d1 = parseFloat(document.getElementById(rcMatch ? ('rc-d1-'+rcMatch[1]) : 'p-d1').value);
+  const d2 = parseFloat(document.getElementById(rcMatch ? ('rc-d2-'+rcMatch[1]) : 'p-d2').value);
   const now = new Date();
   const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   const d1d2 = (d1 && d2) ? ` ${d1}→${d2}` : '';
@@ -1791,13 +1826,18 @@ function renderPass() {
     <div class="metric"><div class="metric-label">패스당 평균</div><div class="metric-value">${avgRa.toFixed(2)}<span class="metric-unit">%</span></div></div>
     <div class="metric"><div class="metric-label">총 진변형률</div><div class="metric-value">${totalStrain.toFixed(4)}</div></div>
     ${overCount > 0 ? `<div class="metric danger-m"><div class="metric-label">한계 초과</div><div class="metric-value">${overCount}<span class="metric-unit">패스</span></div></div>` : ''}
+    ${rows[rows.length-1].ra > 15 ? `<div class="metric danger-m"><div class="metric-label">마지막 패스 15% 초과</div><div class="metric-value">${rows[rows.length-1].ra.toFixed(2)}<span class="metric-unit">%</span></div><div style="font-size:11px;color:var(--text3);margin-top:2px;">사내 기준(DSRF-1210-14) 15% 이하 권장</div></div>` : ''}
   `;
 
   // 테이블
   tbody.innerHTML = rows.map((r, i) => {
     const over = r.ra > limit;
     const near = r.ra > limit * 0.9 && !over;
-    const badge = over ? `<span class="badge badge-danger">초과</span>` : near ? `<span class="badge badge-warn">주의</span>` : '';
+    // 마지막 패스 감면율 15% 초과 경고 (사내 비틀림 파단 불량 조치 기준 DSRF-1210-14:
+    // 비도금 Final 15% 이하 / 도금 마지막 블록 Max 15%)
+    const lastOver15 = i === rows.length - 1 && r.ra > 15;
+    const badge = (over ? `<span class="badge badge-danger">초과</span>` : near ? `<span class="badge badge-warn">주의</span>` : '')
+      + (lastOver15 ? `<span class="badge badge-warn" title="사내 기준(DSRF-1210-14): 마지막 패스 15% 이하">마지막 15%↑</span>` : '');
     const barW  = Math.min(Math.round((r.ra / limit) * 60), 60);
     const barCls = over ? 'over-bar' : near ? 'warn-bar' : 'ok-bar';
     const isLastLocked = lockFinalEnabled && i === rows.length - 1;
@@ -1845,10 +1885,10 @@ function renderPass() {
         <div class="pass-card-row">
           <span class="pass-card-label">다이경 (mm)</span>
           <div class="die-stepper">
-            <button type="button" class="die-step-btn" onclick="stepDie(${i}, -0.01)" ${isLastLocked ? 'disabled' : ''} title="-0.1">−</button>
+            <button type="button" class="die-step-btn" onclick="stepDie(${i}, -0.01)" ${isLastLocked ? 'disabled' : ''} title="-0.01">−</button>
             <input type="number" id="die-input-${i}" value="${dieVal.toFixed(2)}" min="0.01" step="0.01"
               inputmode="decimal" onchange="onDieChange(${i}, this.value)" onkeydown="onDieInputKeydown(event, ${i})" ${isLastLocked ? 'disabled style="opacity:0.55;"' : ''}>
-            <button type="button" class="die-step-btn" onclick="stepDie(${i}, 0.01)" ${isLastLocked ? 'disabled' : ''} title="+0.1">＋</button>
+            <button type="button" class="die-step-btn" onclick="stepDie(${i}, 0.01)" ${isLastLocked ? 'disabled' : ''} title="+0.01">＋</button>
           </div>
         </div>
         <div class="pass-card-row">
@@ -2001,6 +2041,7 @@ function renderChart(rows, limit) {
 /* 초기 실행 */
 calcSingle();
 initPass();
+addRcBlock(); // 신규 작업 1번을 기본으로 하나 띄워둔다(기존 화면과 동일한 첫 화면 구성)
 
 updateTaperLabel();
 
