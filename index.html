@@ -27,7 +27,7 @@
   header { background: var(--accent); color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 12px; }
   header h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
   header span { font-size: 12px; opacity: 0.65; margin-left: auto; }
-  .container { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+  .container { max-width: min(1900px, 97vw); margin: 0 auto; padding: 24px 16px; }
   .tabs { display: flex; border-bottom: 2px solid var(--border); margin-bottom: 24px; }
   .tab { background: none; border: none; padding: 10px 20px; font-size: 14px; font-weight: 500; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: color 0.15s; }
   .tab:hover { color: var(--text); }
@@ -233,7 +233,7 @@
         <div style="display:flex;flex-direction:row;gap:16px;align-items:flex-start;overflow-x:auto;padding-bottom:8px;">
 
     <!-- ── 왼쪽: 기존 작업 ── -->
-    <div style="flex:0 0 440px;min-width:440px;">
+    <div style="flex:0 0 680px;min-width:680px;">
       <div style="font-size:12px;font-weight:700;color:var(--text2);padding:8px 12px;background:var(--surface2);border-radius:8px;margin-bottom:12px;text-align:center;">← 기존 작업</div>
     <div class="card" style="margin-bottom:16px;">
       <div class="card-title">조건 설정</div>
@@ -602,7 +602,7 @@ function addRcBlock() {
   rcState[idx] = { diameters: [], baseD1: null };
   const wrap = document.createElement('div');
   wrap.id = 'rc-block-' + idx;
-  wrap.style.cssText = 'flex:0 0 440px;min-width:440px;'; // 기존 작업과 같은 폭으로, 오른쪽에 한 칸씩 이어붙는다
+  wrap.style.cssText = 'flex:0 0 680px;min-width:680px;'; // 기존 작업과 같은 폭으로, 오른쪽에 한 칸씩 이어붙는다
   wrap.innerHTML = rcBlockTemplate(idx);
   document.getElementById('rc-blocks').appendChild(wrap);
   wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'end' });
