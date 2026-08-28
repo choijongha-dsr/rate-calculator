@@ -230,10 +230,10 @@
   <div id="tab-pass" class="tab-content">
 
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
+        <div style="display:flex;flex-direction:row;gap:16px;align-items:flex-start;overflow-x:auto;padding-bottom:8px;">
 
     <!-- ── 왼쪽: 기존 작업 ── -->
-    <div>
+    <div style="flex:0 0 440px;min-width:440px;">
       <div style="font-size:12px;font-weight:700;color:var(--text2);padding:8px 12px;background:var(--surface2);border-radius:8px;margin-bottom:12px;text-align:center;">← 기존 작업</div>
     <div class="card" style="margin-bottom:16px;">
       <div class="card-title">조건 설정</div>
@@ -335,10 +335,10 @@
     </div>
     </div><!-- /기존 작업 컬럼 -->
 
-    <!-- ── 오른쪽: 신규 작업 (여러 개 추가 가능) ── -->
-    <div>
-      <div id="rc-blocks"></div>
-      <button class="tool-btn" onclick="addRcBlock()" style="width:100%;padding:12px;font-size:14px;font-weight:700;background:var(--accent-light);color:var(--accent);border:1.5px dashed var(--accent);">＋ 신규 작업 추가</button>
+    <!-- ── 오른쪽: 신규 작업 (누를 때마다 오른쪽으로 하나씩 더 생김) ── -->
+    <div id="rc-blocks" style="display:contents;"></div>
+    <div style="flex:0 0 160px;min-width:160px;align-self:stretch;">
+      <button class="tool-btn" onclick="addRcBlock()" style="width:100%;height:100%;min-height:120px;font-size:14px;font-weight:700;background:var(--accent-light);color:var(--accent);border:1.5px dashed var(--accent);border-radius:8px;">＋<br>신규 작업<br>추가</button>
     </div><!-- /신규 작업 컬럼 -->
 
     </div><!-- /2컬럼 grid -->
@@ -602,8 +602,10 @@ function addRcBlock() {
   rcState[idx] = { diameters: [], baseD1: null };
   const wrap = document.createElement('div');
   wrap.id = 'rc-block-' + idx;
+  wrap.style.cssText = 'flex:0 0 440px;min-width:440px;'; // 기존 작업과 같은 폭으로, 오른쪽에 한 칸씩 이어붙는다
   wrap.innerHTML = rcBlockTemplate(idx);
   document.getElementById('rc-blocks').appendChild(wrap);
+  wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'end' });
 }
 
 function removeRcBlock(idx) {
