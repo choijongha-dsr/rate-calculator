@@ -1518,7 +1518,7 @@ function applyLinearTaperedPass() {
   const peakIdx = Math.min(1, n - 2);
   const weights = buildTaperWeights(n, peakIdx, 0.2, true); // 2번(정점)이 너무 세지 않도록 진폭을 낮춤
   passDiameters = buildSmoothTaperedPass(d1, d2, n, weights, peakIdx);
-  passApplied = passDiameters.map(() => true); // 전체 재설계이므로 적용 상태도 초기화
+  passApplied = normalizeApplied(passDiameters, passApplied); // 미적용으로 표시해둔 패스는 그대로 유지
 
   const ctrl = document.getElementById('taper-controls');
   if (ctrl) ctrl.style.display = 'none'; // 직선형태는 조절 슬라이더 없음
@@ -1536,7 +1536,7 @@ function applyTaperedPass() {
   const peakIdx = Math.min(parseInt(document.getElementById('taper-peak').value) - 1, n - 2);
   const weights = buildTaperWeights(n, peakIdx, 0.3, false);
   passDiameters = buildSmoothTaperedPass(d1, d2, n, weights, peakIdx);
-  passApplied = passDiameters.map(() => true); // 전체 재설계이므로 적용 상태도 초기화
+  passApplied = normalizeApplied(passDiameters, passApplied); // 미적용으로 표시해둔 패스는 그대로 유지
 
   const ctrl = document.getElementById('taper-controls');
   if(ctrl) ctrl.style.display = 'flex';
