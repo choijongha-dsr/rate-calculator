@@ -421,10 +421,23 @@ let passMachineLimit = 24;
 let lockFinalEnabled = true;  // 완선경 고정 여부
 // 신규 작업은 여러 개를 이어서 추가할 수 있다 — idx(1,2,3...) 별로 다이경 배열과
 // "복사 시점 중간선경"을 독립적으로 들고 있는다.
-let rcState = {};             // idx -> { diameters: [], baseD1: null }
+let rcState = {};             // idx -> { diameters: [], applied: [], baseD1: null }
 let rcNextIdx = 0;            // 다음에 추가할 신규 작업 번호
 let _passLastD1 = null;       // 직전에 renderPass가 정상 렌더링한 중간선경 (엔드포인트 변경 시 비례 재조정용)
 let _passLastD2 = null;       // 직전에 renderPass가 정상 렌더링한 완선경
+let passDiameters = [];       // 기존 작업의 각 패스 다이경(출선경) 절대값
+let passApplied = [];         // 기존 작업 각 패스의 "적용" 여부(false면 계산에서 완전히 제외, 목록엔 그대로 남음)
+
+// diameters 배열과 applied 배열의 길이를 맞춰준다. 새로 생긴 자리는 기본 "적용"으로 채우고,
+// 마지막 패스(완선경)는 항상 적용 상태를 강제한다 — 완선경을 미적용으로 빼면 목표 자체가
+// 사라지므로 의미가 없다. 배열 재설계(초기화/재배분/최적교체 등) 시 개별적으로 applied를
+// 갱신해주지 않아도, 렌더링 직전에 항상 이 함수를 거치면 길이 불일치로 인한 오류가 없다.
+function normalizeApplied(diameters, applied) {
+  const arr = (applied || []).slice(0, diameters.length);
+  while (arr.length < diameters.length) arr.push(true);
+  if (arr.length > 0) arr[arr.length - 1] = true; // 완선경은 항상 적용
+  return arr;
+}
 
 // "기존 다이스 복사"의 원본 — 1번 신규 작업은 기존 작업(passDiameters)에서, 2번째부터는
 // 바로 앞 신규 작업에서 그대로 이어받는다(사용자 요청: 순차적으로 여러 완선경을 처리할 때
@@ -432,6 +445,10 @@ let _passLastD2 = null;       // 직전에 renderPass가 정상 렌더링한 완
 function getRcSourceDiameters(idx) {
   if (idx <= 1 || !rcState[idx - 1] || !rcState[idx - 1].diameters.length) return passDiameters;
   return rcState[idx - 1].diameters;
+}
+function getRcSourceApplied(idx) {
+  if (idx <= 1 || !rcState[idx - 1] || !rcState[idx - 1].diameters.length) return normalizeApplied(passDiameters, passApplied);
+  return normalizeApplied(rcState[idx - 1].diameters, rcState[idx - 1].applied);
 }
 function getRcSourceD1(idx) {
   if (idx <= 1 || !rcState[idx - 1] || !rcState[idx - 1].diameters.length) return parseFloat(document.getElementById('p-d1').value);
@@ -534,7 +551,6 @@ function rcBlockTemplate(idx) {
       <div class="toolbar" style="margin-top:8px;">
         <button class="tool-btn" onclick="rcCopyFromExisting(${idx})">📋 ${idx <= 1 ? '기존' : '이전'} 다이스 복사</button>
         <button class="tool-btn" onclick="rcResetPass(${idx})">↺ 일반작업 재배분</button>
-        <button class="tool-btn" onclick="rcTaperedPass(${idx})">📉 테이퍼드 재배분</button>
         <button class="tool-btn" onclick="rcOptimize(${idx})" style="background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700;">⚡ 최적 교체 추천</button>
       </div>
       <div id="rc-summary-${idx}" style="margin-top:10px;"></div>
@@ -599,7 +615,7 @@ function rcBlockTemplate(idx) {
 
 function addRcBlock() {
   const idx = ++rcNextIdx;
-  rcState[idx] = { diameters: [], baseD1: null };
+  rcState[idx] = { diameters: [], applied: [], baseD1: null };
   const wrap = document.createElement('div');
   wrap.id = 'rc-block-' + idx;
   wrap.style.cssText = 'flex:0 0 680px;min-width:680px;'; // 기존 작업과 같은 폭으로, 오른쪽에 한 칸씩 이어붙는다
@@ -767,7 +783,9 @@ function rcAutoBalance(idx, d1, d2) {
 // 않는다(재배분은 사용자가 rc-d1/rc-d2를 직접 바꿀 때 calcRechange()가 알아서 처리한다).
 function rcCopyFromExisting(idx) {
   const source = getRcSourceDiameters(idx);
+  const sourceApplied = getRcSourceApplied(idx);
   rcState[idx].diameters = [...source];
+  rcState[idx].applied = [...sourceApplied]; // 적용/미적용 상태도 원본 그대로 이어받음
   rcState[idx].baseD1 = getRcSourceD1(idx); // 이 시점의 중간선경을 기준으로 이후 변경 여부 판단
   renderRcPass(idx);
 }
@@ -796,6 +814,7 @@ function rcResetPass(idx) {
     return cur;
   });
   st.diameters[n-1] = d2;
+  st.applied = st.diameters.map(() => true); // 전체 재설계이므로 적용 상태도 초기화
   renderRcPass(idx);
 }
 
@@ -816,6 +835,7 @@ function rcTaperedPass(idx) {
   let cur=d1;
   st.diameters=ss.map((s,i)=>{const next=i===n-1?d2:cur*Math.exp(-s/2);cur=next;return next;});
   st.diameters[n-1]=d2;
+  st.applied = st.diameters.map(() => true); // 전체 재설계이므로 적용 상태도 초기화
   renderRcPass(idx);
 }
 
@@ -843,6 +863,8 @@ function insertRcPass(idx, i) {
   const after  = st.diameters[i + 1];
   if(after === undefined) return;
   const mid = parseFloat(Math.sqrt(before * after).toFixed(3));
+  st.applied = normalizeApplied(st.diameters, st.applied); // 끼워넣기 전 길이로 먼저 정규화
+  st.applied.splice(i + 1, 0, true); // 방금 새로 끼운 패스는 항상 적용 상태로 시작
   st.diameters.splice(i + 1, 0, mid);
   renderRcPass(idx);
 }
@@ -851,7 +873,19 @@ function insertRcPass(idx, i) {
 function removeRcPass(idx, i) {
   const st = rcState[idx];
   if(st.diameters.length <= 1) return;
+  st.applied = normalizeApplied(st.diameters, st.applied); // 제거 전 길이로 먼저 정규화
+  st.applied.splice(i, 1);
   st.diameters.splice(i, 1);
+  renderRcPass(idx);
+}
+
+// 신규 작업 i번 패스 적용/미적용 토글 — 미적용이면 목록엔 남지만 감면율/테이퍼 계산에서
+// 그 다이가 아예 없었던 것처럼 완전히 제외된다. 완선경(마지막 패스)은 토글 불가.
+function toggleRcApplied(idx, i) {
+  const st = rcState[idx];
+  st.applied = normalizeApplied(st.diameters, st.applied);
+  if (i === st.diameters.length - 1) return; // 완선경은 항상 적용
+  st.applied[i] = !st.applied[i];
   renderRcPass(idx);
 }
 
@@ -873,19 +907,25 @@ function renderRcPass(idx) {
   if(note) note.textContent = `투입 중간선경: ${d1} mm → 아래 다이 1번부터 순서대로 통과`;
 
   const limit = passMachineLimit;
-  let prev = d1, totalRa=0, overCount=0;
+  // 미적용(applied=false) 패스는 목록엔 남지만 시퀀스에서 완전히 빠진 것처럼 취급한다 —
+  // prev(입선경 기준)를 갱신하지 않고 건너뛴다.
+  st.applied = normalizeApplied(st.diameters, st.applied);
+  let prev = d1;
 
   const rows = st.diameters.map((dout, i) => {
+    const applied = st.applied[i];
+    if (!applied) return { dout, applied: false };
     const ra      = (1-(dout*dout)/(prev*prev))*100;
     const dA      = prev*prev*Math.PI/4 - dout*dout*Math.PI/4;
     const strain  = Math.log((prev*prev)/(dout*dout));
     prev = dout;
-    return {dout, ra, dA, strain};
+    return {dout, ra, dA, strain, applied: true};
   });
+  const appliedRows = rows.filter(r => r.applied);
 
   totalRa = (1-(d2*d2)/(d1*d1))*100;
-  const avgRa = rows.reduce((s,r)=>s+r.ra,0)/rows.length;
-  overCount = rows.filter(r=>r.ra>limit).length;
+  const avgRa = appliedRows.length ? appliedRows.reduce((s,r)=>s+r.ra,0)/appliedRows.length : 0;
+  overCount = appliedRows.filter(r=>r.ra>limit).length;
 
   const n = st.diameters.length;
   const source = getRcSourceDiameters(idx); // 1번은 기존 작업, 2번째부터는 바로 앞 신규 작업
@@ -897,7 +937,7 @@ function renderRcPass(idx) {
   let replaceNums = [], keepNums = [];
   if(hasPrev) {
     rows.forEach((r, i) => {
-      if(i === n-1) return; // 완선경은 항상 교체이므로 목록에서 제외
+      if(i === n-1 || !r.applied) return; // 완선경 · 미적용 패스는 판정 목록에서 제외
       const isSame = i < source.length && Math.abs(r.dout - source[i]) < 0.005;
       if(!isSame) replaceNums.push(i+1);
       else keepNums.push(i+1);
@@ -921,15 +961,38 @@ function renderRcPass(idx) {
 
   // 테이블 렌더링
   tbody.innerHTML = rows.map((r, i) => {
+    const isLast   = i === rows.length - 1;
+    const canToggle = !isLast; // 완선경은 항상 적용, 토글 불가
+    const dieVal   = r.dout;
+
+    if (!r.applied) {
+      return `<tr style="opacity:0.5;">
+        <td><span class="pass-num" style="text-decoration:line-through;">${i+1}번</span></td>
+        <td style="white-space:nowrap;">
+          <input class="ra-input" type="number" value="${dieVal.toFixed(2)}" min="0.01" step="0.01" inputmode="decimal" style="width:72px;vertical-align:middle;text-decoration:line-through;" disabled>
+        </td>
+        <td class="computed" style="text-decoration:line-through;">–</td>
+        <td>–</td>
+        <td class="computed">–</td>
+        <td class="computed">–</td>
+        <td><span class="badge" style="background:var(--surface2);color:var(--text3);">미적용</span></td>
+        <td>
+          <div style="display:flex;gap:4px;">
+            <button class="act-btn" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border2);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="toggleRcApplied(${idx},${i})" title="다시 적용">미적용</button>
+            ${st.diameters.length > 1 ? `<button class="act-btn" style="background:var(--danger-light);color:var(--danger);border:1px solid var(--danger);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="removeRcPass(${idx},${i})" title="제거">제거</button>` : ''}
+          </div>
+        </td>
+      </tr>
+      `;
+    }
+
     const over  = r.ra > limit;
     const near  = r.ra > limit*0.9 && !over;
-    const isLast= i===rows.length-1;
     const lastOver15 = isLast && r.ra > 15;
     const badge = (over?`<span class="badge badge-danger">초과</span>`:near?`<span class="badge badge-warn">주의</span>`:'')
       + (lastOver15 ? `<span class="badge badge-warn" title="사내 기준(DSRF-1210-14): 마지막 패스 15% 이하">마지막 15%↑</span>` : '');
     const barW  = Math.min(Math.round((r.ra/limit)*60),60);
     const barCls= over?'over-bar':near?'warn-bar':'ok-bar';
-    const dieVal= r.dout;
 
     // 판정: 원본(source)과 실제로 같은 값인지로 판단(균등 배분 이상값과 비교하면
     // 일부러 낮게 설계해둔 패스가 안 바뀌었는데도 "교체 필요"로 잘못 뜨는 문제가 있었다).
@@ -962,6 +1025,7 @@ function renderRcPass(idx) {
       <td>${judgeCell}</td>
       <td>
         <div style="display:flex;gap:4px;">
+          ${canToggle ? `<button class="act-btn" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border2);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="toggleRcApplied(${idx},${i})" title="계산에서 제외">적용</button>` : ''}
           <button class="act-btn" style="background:var(--accent-light);color:var(--accent);border:1px solid var(--accent);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="insertRcPass(${idx},${i})" title="${i+1}번 뒤에 추가">추가</button>
           ${st.diameters.length > 1 ? `<button class="act-btn" style="background:var(--danger-light);color:var(--danger);border:1px solid var(--danger);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="removeRcPass(${idx},${i})" title="제거">제거</button>` : ''}
         </div>
@@ -970,8 +1034,8 @@ function renderRcPass(idx) {
     `;
   }).join('');
 
-  // 차트 렌더링
-  renderRcChart(idx, rows.map(r=>r.ra), rows.length, limit);
+  // 차트 렌더링 — 실제 계산에 쓰인(적용된) 패스만 선으로 이어서 표시
+  renderRcChart(idx, appliedRows.map(r=>r.ra), appliedRows.length, limit);
 
   // Dies 검사표 렌더링
   renderRcDies(idx, rows, d1, d2);
@@ -1050,7 +1114,16 @@ function renderRcDies(idx, rows, d1, d2) {
     }
 
     let rightCells = '';
-    if(r){
+    let rowGrayed = false;
+    if(r && r.applied === false){
+      // 미적용 패스는 완전히 숨기지 않고 회색으로 눈에 보이게만 남겨둔다.
+      rowGrayed = true;
+      rightCells = `
+        <td class="dise-num">${i+1}</td>
+        <td class="dise-cell">${r.dout.toFixed(2)}</td>
+        <td class="dise-cell">–</td>
+        <td class="dise-cell">미적용</td>`;
+    } else if(r){
       const cumulRa = (1-(r.dout*r.dout)/(d1*d1))*100;
       rightCells = `
         <td class="dise-num">${i+1}</td>
@@ -1060,7 +1133,7 @@ function renderRcDies(idx, rows, d1, d2) {
     } else {
       rightCells = `<td></td><td></td><td></td><td></td>`;
     }
-    html += `<tr class="${i===rows.length-1?'dies-final-row':''}">${leftCells}${rightCells}</tr>`;
+    html += `<tr class="${i===rows.length-1?'dies-final-row':''}"${rowGrayed?' style="opacity:0.5;"':''}>${leftCells}${rightCells}</tr>`;
   }
   tbody.innerHTML = html;
 }
@@ -1186,6 +1259,7 @@ function initPass() {
     passDiameters.push(cur);
   }
   passDiameters[n - 1] = d2; // 마지막은 항상 정확히 d2
+  passApplied = passDiameters.map(() => true); // 전체 재설계이므로 적용 상태도 초기화
   renderPass();
 }
 
@@ -1444,6 +1518,7 @@ function applyLinearTaperedPass() {
   const peakIdx = Math.min(1, n - 2);
   const weights = buildTaperWeights(n, peakIdx, 0.2, true); // 2번(정점)이 너무 세지 않도록 진폭을 낮춤
   passDiameters = buildSmoothTaperedPass(d1, d2, n, weights, peakIdx);
+  passApplied = passDiameters.map(() => true); // 전체 재설계이므로 적용 상태도 초기화
 
   const ctrl = document.getElementById('taper-controls');
   if (ctrl) ctrl.style.display = 'none'; // 직선형태는 조절 슬라이더 없음
@@ -1461,6 +1536,7 @@ function applyTaperedPass() {
   const peakIdx = Math.min(parseInt(document.getElementById('taper-peak').value) - 1, n - 2);
   const weights = buildTaperWeights(n, peakIdx, 0.3, false);
   passDiameters = buildSmoothTaperedPass(d1, d2, n, weights, peakIdx);
+  passApplied = passDiameters.map(() => true); // 전체 재설계이므로 적용 상태도 초기화
 
   const ctrl = document.getElementById('taper-controls');
   if(ctrl) ctrl.style.display = 'flex';
@@ -1477,11 +1553,13 @@ function resetPass() { initPass(); }
 
 function addPass() {
   if (passDiameters.length === 0) return;
+  passApplied = normalizeApplied(passDiameters, passApplied);
   if (lockFinalEnabled && passDiameters.length > 0) {
     // 마지막(고정) 다이 앞에 새 다이를 끼워넣음: 직전 다이경과 마지막 다이경의 중간값으로 시작
     const before = passDiameters.length >= 2 ? passDiameters[passDiameters.length - 2] : parseFloat(document.getElementById('p-d1').value);
     const after  = passDiameters[passDiameters.length - 1];
     const mid = Math.sqrt(before * after); // 면적 기준 중간값
+    passApplied.splice(passDiameters.length - 1, 0, true);
     passDiameters.splice(passDiameters.length - 1, 0, mid);
   } else {
     const d1 = parseFloat(document.getElementById('p-d1').value);
@@ -1490,6 +1568,7 @@ function addPass() {
     const ratio = last / prevIn; // 마지막 패스와 비슷한 비율로 한 단계 추가
     const next = last * (ratio < 1 ? ratio : 0.82);
     passDiameters.push(Math.max(next, last * 0.5));
+    passApplied.push(true);
   }
   renderPass();
 }
@@ -1501,6 +1580,8 @@ function insertPass(i) {
   const after  = passDiameters[i + 1];
   if (after === undefined) return;
   const mid = parseFloat(Math.sqrt(before * after).toFixed(3));
+  passApplied = normalizeApplied(passDiameters, passApplied);
+  passApplied.splice(i + 1, 0, true);
   passDiameters.splice(i + 1, 0, mid);
   renderPass();
 }
@@ -1515,7 +1596,18 @@ function removePass(i) {
     document.getElementById('p-d1').value = newStart.toFixed(3);
   }
 
+  passApplied = normalizeApplied(passDiameters, passApplied);
+  passApplied.splice(i, 1);
   passDiameters.splice(i, 1);
+  renderPass();
+}
+
+// i번 패스 적용/미적용 토글 — 미적용이면 목록엔 남지만 감면율/테이퍼 계산에서 그 다이가
+// 아예 없었던 것처럼 완전히 제외된다. 완선경(마지막 패스)은 토글 불가.
+function toggleApplied(i) {
+  passApplied = normalizeApplied(passDiameters, passApplied);
+  if (i === passDiameters.length - 1) return; // 완선경은 항상 적용
+  passApplied[i] = !passApplied[i];
   renderPass();
 }
 
@@ -1720,6 +1812,7 @@ function renderRecordsList() {
           <div style="font-size:14px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(r.title)}</div>
           <div style="font-size:11px; color:var(--text3);">${r.date}${r.jobNo ? ' · ' + escapeHtml(r.jobNo) : ''}${r.plating !== undefined ? ' · ' + (r.plating ? '도금' : '비도금') : ''}</div>
         </div>
+        <button style="background:var(--surface);color:var(--text2);border:1px solid var(--border2);padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;" onclick="event.stopPropagation(); renameRecord('${r.id}')">✎ 이름수정</button>
         <button style="background:var(--surface);color:var(--text2);border:1px solid var(--border2);padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;" onclick="event.stopPropagation(); downloadRecordImage('${r.id}')">다운로드</button>
         <button style="background:var(--danger-light);color:var(--danger);border:1px solid var(--danger);padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;" onclick="event.stopPropagation(); deleteRecord('${r.id}')">삭제</button>
       </div>
@@ -1749,6 +1842,19 @@ async function downloadRecordImage(id) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+}
+
+function renameRecord(id) {
+  const records = loadRecords();
+  const r = records.find(x => x.id === id);
+  if (!r) return;
+  const newTitle = prompt('새 이름을 입력하세요', r.title);
+  if (newTitle === null) return; // 취소
+  const trimmed = newTitle.trim();
+  if (!trimmed) return;
+  r.title = trimmed;
+  if (!saveRecords(records)) return;
+  renderRecordsList();
 }
 
 function deleteRecord(id) {
@@ -1786,9 +1892,14 @@ function renderPass() {
 
   document.getElementById('feed-note').innerHTML = `투입 중간선경: <strong style="font-family:var(--mono);color:var(--text);">${d1.toFixed(3)} mm</strong> → 아래 다이 1번부터 순서대로 통과`;
 
-  // 각 패스 계산: passDiameters[i] = 그 패스의 다이경(출선경) 절대값
+  // 각 패스 계산: passDiameters[i] = 그 패스의 다이경(출선경) 절대값.
+  // 미적용(applied=false) 패스는 목록엔 남지만 시퀀스에서 완전히 빠진 것처럼 취급한다 —
+  // din(입선경)의 기준이 되는 cur를 갱신하지 않고 건너뛴다.
+  passApplied = normalizeApplied(passDiameters, passApplied);
   let cur = d1;
   const rows = passDiameters.map((dieD, i) => {
+    const applied = passApplied[i];
+    if (!applied) return { dout: dieD, applied: false };
     const din   = cur;
     const dout  = dieD;
     const ra    = (1 - (dout*dout)/(din*din)) * 100;
@@ -1797,16 +1908,17 @@ function renderPass() {
     const strain = Math.log(A0p/Ap);
     const dA    = A0p - Ap;
     cur = dout;
-    return { din, dout, ra, strain, dA };
+    return { din, dout, ra, strain, dA, applied: true };
   });
+  const appliedRows = rows.filter(r => r.applied);
 
   const finalD = rows[rows.length-1].dout;
   const totalRa = (1 - (finalD*finalD)/(d1*d1)) * 100;
   const targetRa = (1 - (d2*d2)/(d1*d1)) * 100;
   const diff = finalD - d2; // 목표 대비 잔차
-  const totalStrain = rows.reduce((s,r) => s + r.strain, 0);
-  const avgRa = rows.reduce((s,r) => s+r.ra, 0) / rows.length;
-  const overCount = rows.filter(r => r.ra > limit).length;
+  const totalStrain = appliedRows.reduce((s,r) => s + r.strain, 0);
+  const avgRa = appliedRows.length ? appliedRows.reduce((s,r) => s+r.ra, 0) / appliedRows.length : 0;
+  const overCount = appliedRows.filter(r => r.ra > limit).length;
 
   // 잔여 감면율 표시
   const remaining = targetRa - totalRa;
@@ -1833,6 +1945,30 @@ function renderPass() {
 
   // 테이블
   tbody.innerHTML = rows.map((r, i) => {
+    const isLastLocked = lockFinalEnabled && i === rows.length - 1;
+    const dieVal = isLastLocked ? d2 : r.dout;
+    const canToggle = i !== rows.length - 1; // 완선경(마지막)은 항상 적용, 토글 불가
+
+    if (!r.applied) {
+      // 미적용 패스: 목록엔 남지만 감면율 계산에서 완전히 제외됨 — 회색/취소선으로 표시
+      return `<tr style="opacity:0.5;">
+        <td><span class="pass-num" style="text-decoration:line-through;">${i+1}번</span></td>
+        <td style="white-space:nowrap;">
+          <input class="ra-input" type="number" value="${dieVal.toFixed(2)}" min="0.01" step="0.01" inputmode="decimal" style="width:72px;vertical-align:middle;text-decoration:line-through;" disabled>
+        </td>
+        <td class="computed" style="text-decoration:line-through;">–</td>
+        <td>–</td>
+        <td class="computed">–</td>
+        <td class="computed">–</td>
+        <td>
+          <div class="row-actions" style="display:flex;gap:4px;align-items:center;">
+            <button class="act-btn" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border2);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="toggleApplied(${i})" title="다시 적용">미적용</button>
+            <button class="act-btn" style="background:var(--danger-light);color:var(--danger);border:1px solid var(--danger);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="removePass(${i})" title="삭제">제거</button>
+          </div>
+        </td>
+      </tr>`;
+    }
+
     const over = r.ra > limit;
     const near = r.ra > limit * 0.9 && !over;
     // 마지막 패스 감면율 15% 초과 경고 (사내 비틀림 파단 불량 조치 기준 DSRF-1210-14:
@@ -1842,8 +1978,6 @@ function renderPass() {
       + (lastOver15 ? `<span class="badge badge-warn" title="사내 기준(DSRF-1210-14): 마지막 패스 15% 이하">마지막 15%↑</span>` : '');
     const barW  = Math.min(Math.round((r.ra / limit) * 60), 60);
     const barCls = over ? 'over-bar' : near ? 'warn-bar' : 'ok-bar';
-    const isLastLocked = lockFinalEnabled && i === rows.length - 1;
-    const dieVal = isLastLocked ? d2 : r.dout;
 
     return `<tr class="${over ? 'row-over' : ''}">
       <td><span class="pass-num">${i+1}번</span></td>
@@ -1859,6 +1993,7 @@ function renderPass() {
       <td class="computed">${r.strain.toFixed(4)}</td>
       <td>
         <div class="row-actions" style="display:flex;gap:4px;align-items:center;">
+          ${canToggle ? `<button class="act-btn" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border2);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="toggleApplied(${i})" title="계산에서 제외">적용</button>` : ''}
           ${!isLastLocked ? `<button class="act-btn" style="background:var(--accent-light);color:var(--accent);border:1px solid var(--accent);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="insertPass(${i})" title="${i+1}번 뒤에 추가">추가</button>` : ''}
           ${!isLastLocked ? `<button class="act-btn" style="background:var(--danger-light);color:var(--danger);border:1px solid var(--danger);padding:2px 6px;border-radius:4px;font-size:11px;" onclick="removePass(${i})" title="삭제">제거</button>` : ''}
         </div>
@@ -1870,12 +2005,28 @@ function renderPass() {
   const cardsEl = document.getElementById('pass-cards');
   if (cardsEl) {
     cardsEl.innerHTML = rows.map((r, i) => {
+      const isLastLocked = lockFinalEnabled && i === rows.length - 1;
+      const dieVal = isLastLocked ? d2 : r.dout;
+      const canToggle = i !== rows.length - 1;
+
+      if (!r.applied) {
+        return `<div class="pass-card" style="opacity:0.5;">
+          <div class="pass-card-top">
+            <span class="pass-card-num" style="text-decoration:line-through;">${i+1}번 다이 (미적용)</span>
+            <button class="pass-card-del" onclick="removePass(${i})">✕</button>
+          </div>
+          <div class="pass-card-row">
+            <span class="pass-card-label">다이경 (mm)</span>
+            <span class="pass-card-stat" style="text-decoration:line-through;">${dieVal.toFixed(2)}</span>
+          </div>
+          <button onclick="toggleApplied(${i})" style="width:100%;margin-top:8px;padding:6px;border:1px solid var(--border2);border-radius:6px;background:var(--surface2);color:var(--text2);font-size:12px;">다시 적용</button>
+        </div>`;
+      }
+
       const over = r.ra > limit;
       const near = r.ra > limit * 0.9 && !over;
       const barCls = over ? 'over-bar' : near ? 'warn-bar' : 'ok-bar';
       const barPct = Math.min(Math.round((r.ra / limit) * 100), 100);
-      const isLastLocked = lockFinalEnabled && i === rows.length - 1;
-      const dieVal = isLastLocked ? d2 : r.dout;
       const statusBadge = over ? `<span class="badge badge-danger">초과</span>` : near ? `<span class="badge badge-warn">주의</span>` : '';
       return `<div class="pass-card ${over ? 'over' : ''}">
         <div class="pass-card-top">
@@ -1902,6 +2053,7 @@ function renderPass() {
           <span class="pass-card-label">면적감소 / 진변형률</span>
           <span class="pass-card-stat">${r.dA.toFixed(3)} / ${r.strain.toFixed(4)}</span>
         </div>
+        ${canToggle ? `<button onclick="toggleApplied(${i})" style="width:100%;margin-top:8px;padding:6px;border:1px dashed var(--border2);border-radius:6px;background:transparent;color:var(--text3);font-size:12px;">이 패스 미적용으로</button>` : ''}
       </div>
       ${(!isLastLocked && i < rows.length - 1) ? `
       <button onclick="insertPass(${i})"
@@ -1918,7 +2070,9 @@ function renderPass() {
     ? `※ 중간선경 ${d1} mm → 실제 완선경 ${finalD.toFixed(3)} mm (목표 ${d2} mm 와 ${Math.abs(diff).toFixed(3)} mm 차이). 감면율을 조정하거나 패스를 추가하세요.`
     : '';
 
-  renderChart(rows, limit);
+  // 차트는 실제 계산에 쓰인(적용된) 패스만 선으로 이어서 표시.
+  // DIES 검사표는 미적용 패스도 회색으로 눈에 보이게 남겨둔다(완전히 숨기지 않음).
+  renderChart(appliedRows, limit);
   renderDiesTable(rows, d1);
 }
 
@@ -1956,9 +2110,19 @@ function renderDiesTable(rows, d1) {
       leftCells = `<td class="label-cell"></td><td colspan="2"></td>`;
     }
 
-    // 우측 DISE 데이터 (해당 패스가 있을 때만)
+    // 우측 DISE 데이터 (해당 패스가 있을 때만). 미적용 패스는 완전히 숨기지 않고
+    // 회색으로 표시만 한다(계산에선 제외되지만 목록에는 남는다는 걸 눈으로 보여주기 위해).
     let rightCells;
-    if (r) {
+    let rowGrayed = false;
+    if (r && r.applied === false) {
+      rowGrayed = true;
+      rightCells = `
+        <td class="dise-num">${i + 1}</td>
+        <td class="dise-cell">${r.dout.toFixed(2)}</td>
+        <td class="dise-cell">–</td>
+        <td class="dise-cell">미적용</td>
+      `;
+    } else if (r) {
       const cumulRa = (1 - (r.dout*r.dout)/(d1*d1)) * 100;
       rightCells = `
         <td class="dise-num">${i + 1}</td>
@@ -1970,7 +2134,7 @@ function renderDiesTable(rows, d1) {
       rightCells = `<td></td><td></td><td></td><td></td>`;
     }
 
-    html += `<tr class="${isLast ? 'dies-final-row' : ''}">${leftCells}${rightCells}</tr>`;
+    html += `<tr class="${isLast ? 'dies-final-row' : ''}"${rowGrayed ? ' style="opacity:0.5;"' : ''}>${leftCells}${rightCells}</tr>`;
   }
 
   tbody.innerHTML = html;
