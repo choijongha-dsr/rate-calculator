@@ -258,6 +258,7 @@
         <button class="tool-btn" onclick="resetPass()">↺ 일반작업</button>
         <button class="tool-btn" onclick="applyLinearTaperedPass()">📉 고강도작업① (직선형태)</button>
         <button class="tool-btn" onclick="applyTaperedPass()">📉 고강도작업② (균등피크형태)</button>
+        <button class="tool-btn" onclick="applyDescendingTaperedPass()">📉 고강도작업③ (1번최고→감소형태)</button>
         <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text); cursor:pointer; padding:5px 10px; border-radius:5px; background:var(--accent-light);">
           <input type="checkbox" id="lock-final" checked onchange="toggleLockFinal()" style="width:15px;height:15px;cursor:pointer;">
           🔒 완선경 고정 (마지막 패스 = 완선경 항상 유지)
@@ -1558,6 +1559,26 @@ function applyTaperedPass() {
   const ctrl = document.getElementById('taper-controls');
   if(ctrl) ctrl.style.display = 'flex';
   updateTaperLabel();
+  renderPass();
+}
+
+// 고강도작업③: 1번최고→감소형태 — 1번 패스가 제일 세게 시작해서(오르내림 없이) 끝까지
+// 계속 완만히 낮아지기만 한다. ①/②와 같은 곡선 함수를 peakIdx=0(정점이 맨 처음)으로
+// 쓰는 것뿐이라 별도 로직 없이 그대로 재사용된다.
+function applyDescendingTaperedPass() {
+  const d1 = parseFloat(document.getElementById('p-d1').value);
+  const d2 = parseFloat(document.getElementById('p-d2').value);
+  const n  = parseInt(document.getElementById('p-passes').value) || 10;
+  if (!d1 || !d2 || d1 <= 0 || d2 <= 0 || d2 >= d1 || n < 1) { passDiameters = []; renderPass(); return; }
+
+  applyTaperToAppliedIndices(d1, d2, (nApplied) => {
+    const peakIdx = 0; // 정점 = 1번 패스, 그 뒤로는 계속 내려가기만 함
+    const weights = buildTaperWeights(nApplied, peakIdx, 0.3, true);
+    return buildSmoothTaperedPass(d1, d2, nApplied, weights, peakIdx);
+  });
+
+  const ctrl = document.getElementById('taper-controls');
+  if (ctrl) ctrl.style.display = 'none'; // 이 형태도 조절 슬라이더 없음
   renderPass();
 }
 
